@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Простой лаунчер для приложения ЭЭГ анализа
+Можно запускать двойным кликом на macOS
+"""
+
+import sys
+import os
+import subprocess
+
+def main():
+    """Запуск приложения"""
+    print("🚀 Запуск приложения ЭЭГ анализа...")
+    print("="*50)
+
+    # Проверяем наличие main.py
+    if not os.path.exists('main.py'):
+        print("❌ Ошибка: файл main.py не найден!")
+        print("Запустите этот скрипт из директории с main.py")
+        input("Нажмите Enter для выхода...")
+        return
+
+    # Запускаем основное приложение
+    try:
+        print("📱 Запуск GUI приложения...")
+        subprocess.run([sys.executable, 'main.py'])
+    except KeyboardInterrupt:
+        print("\n👋 Приложение закрыто пользователем")
+    except Exception as e:
+        print(f"❌ Ошибка запуска: {e}")
+        input("Нажмите Enter для выхода...")
+
+if __name__ == "__main__":
+    main()
