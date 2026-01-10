@@ -10,8 +10,7 @@
 2. Установите зависимости: pip install -r requirements.txt
 3. Запустите сборку: python build_app.py
 
-GKFNAJHVJCGTWBABXYST LJGJKYTYBZ%
-GKFNAJHVJCGTWBABXYST LJGJKYTYBZ%
+
 ПЛАТФОРМОСПЕЦИФИЧНЫЕ ДОПОЛНЕНИЯ:
 
 MACOS:
