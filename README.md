@@ -51,6 +51,7 @@ python main.py
 ### Требования
 - Python 3.8 или выше
 - pip
+- Поддерживаемые ОС: macOS 10.15+, Windows 10+, Linux (Ubuntu 18.04+)
 
 ### Установка зависимостей
 ```bash
@@ -68,6 +69,8 @@ pip install -r requirements.txt
 ## Сборка standalone приложения
 
 Для создания исполняемого файла без установки Python:
+
+### Общие шаги
 
 1. Установите зависимости:
 ```bash
@@ -89,6 +92,26 @@ python build_app.py
 - Соберет приложение с правильной конфигурацией
 
 3. Запустите готовое приложение из папки dist/
+
+### Инструкции для разных платформ
+
+#### macOS
+- Требуется: Xcode Command Line Tools (`xcode-select --install`)
+- Запуск: `./launch_final_app.sh` или двойной клик по `EEG_Analysis.app`
+- При проблемах: `xattr -rd com.apple.quarantine dist/EEG_Analysis.app`
+
+#### Windows
+- Требуется: Microsoft Visual C++ Redistributable (если запрошено)
+- Запуск: двойной клик по `EEG_Analysis.exe` в папке dist
+- Или из командной строки: `dist\\EEG_Analysis.exe`
+
+#### Linux
+- Системные зависимости:
+```bash
+sudo apt-get update
+sudo apt-get install python3-dev python3-pip libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+```
+- Запуск: `chmod +x dist/EEG_Analysis && ./dist/EEG_Analysis`
 
 ## Использование
 
