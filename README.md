@@ -12,6 +12,11 @@
 pip install -r requirements.txt
 python3 main.py
 ```
+Если не работает python3, то нужно использовать python
+```bash
+pip install -r requirements.txt
+python main.py
+```
 
 ## Возможности
 
@@ -72,6 +77,10 @@ pip install -r requirements.txt
 2. Соберите приложение с помощью скрипта:
 ```bash
 python3 build_app.py
+```
+Если не работает python3, то нужно использовать python
+```bash
+python build_app.py
 ```
 
 Скрипт автоматически:
