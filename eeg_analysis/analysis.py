@@ -7,6 +7,7 @@ import numpy as np
 from scipy import signal
 from scipy.fft import fft, fftfreq
 from scipy.stats import zscore
+from scipy.integrate import trapezoid
 import pywt
 from typing import Dict, List, Tuple, Optional
 import warnings
@@ -95,7 +96,7 @@ class EEGAnalyzer:
         
         # Находим индексы частот в диапазоне
         freq_mask = (freqs >= band[0]) & (freqs <= band[1])
-        band_power = np.trapz(psd[freq_mask], freqs[freq_mask])
+        band_power = trapezoid(psd[freq_mask], freqs[freq_mask])
         
         return band_power
     
