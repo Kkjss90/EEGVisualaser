@@ -102,7 +102,8 @@ python build_app.py
 
 #### Windows
 - Требуется: Microsoft Visual C++ Redistributable (если запрошено)
-- Запуск: двойной клик по `EEG_Analysis.exe` в папке dist
+- Запуск: `start dist\EEG_Analysis.exe`
+- Или двойной клик по `EEG_Analysis.exe` в папке dist
 - Или из командной строки: `dist\\EEG_Analysis.exe`
 
 #### Linux
