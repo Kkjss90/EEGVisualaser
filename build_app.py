@@ -20,8 +20,7 @@ MACOS:
 
 WINDOWS:
 - Установите Microsoft Visual C++ Redistributable (если требуется)
-- Для запуска используйте команду: start dist\\EEG_Analysis.exe
-- Или двойной клик по EEG_Analysis.exe в папке dist
+- Для запуска: двойной клик по EEG_Analysis.exe в папке dist
 - Или из командной строки: dist\\EEG_Analysis.exe
 
 LINUX:
@@ -65,8 +64,6 @@ def get_platform_instructions(platform_name):
         ]
     elif platform_name == "windows":
         return [
-            "start dist\\EEG_Analysis.exe",
-            "# или",
             "dist\\EEG_Analysis.exe",
             "# или двойной клик по файлу EEG_Analysis.exe в папке dist"
         ]
@@ -207,8 +204,6 @@ def main():
             print("\n[INFO] Для Windows:")
             print("- При первом запуске Windows может показать предупреждение безопасности")
             print("- Разрешите запуск, если появится запрос")
-            print("- Если команда 'start' не работает, попробуйте двойной клик по файлу")
-            print("- Или запустите напрямую: dist\\EEG_Analysis.exe")
         elif platform_name == "linux":
             print("\n[INFO] Для Linux:")
             print("- Убедитесь, что установлены системные зависимости:")
