@@ -8,23 +8,36 @@ import os
 from pathlib import Path
 import numpy as np
 import warnings
+import csv
+import time
+from collections import deque
+from datetime import datetime
 
 # Подавление предупреждений macOS
 warnings.filterwarnings('ignore')
 os.environ['QT_MAC_WANTS_LAYER'] = '1'
 
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QFileDialog, QLabel, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QPushButton, QFileDialog, QLabel,
                              QTextEdit, QTabWidget, QSpinBox, QDoubleSpinBox,
                              QComboBox, QGroupBox, QGridLayout, QMessageBox,
-                             QProgressBar, QCheckBox, QFrame, QScrollArea)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
+                             QProgressBar, QCheckBox, QFrame, QScrollArea, QLineEdit)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+
+# Импорт для работы с последовательными портами
+try:
+    import serial
+    from serial.tools import list_ports
+    SERIAL_AVAILABLE = True
+except ImportError:
+    SERIAL_AVAILABLE = False
+    print("Warning: PySerial not available. Live data acquisition will not work.")
 
 # Импорт наших модулей
 from eeg_analysis.data_loader import EEGDataLoader
@@ -37,13 +50,13 @@ class AnalysisThread(QThread):
     """Поток для выполнения анализа в фоне"""
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
-    
+
     def __init__(self, analyzer, analysis_type, **kwargs):
         super().__init__()
         self.analyzer = analyzer
         self.analysis_type = analysis_type
         self.kwargs = kwargs
-    
+
     def run(self):
         try:
             if self.analysis_type == 'psd':
@@ -57,6 +70,632 @@ class AnalysisThread(QThread):
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class SerialDataReader(QThread):
+    """Поток для чтения данных с последовательного порта"""
+    data_received = pyqtSignal(float, str)  # value, timestamp
+    error = pyqtSignal(str)
+
+    def __init__(self, port, baudrate, max_points=600):
+        super().__init__()
+        self.port = port
+        self.baudrate = baudrate
+        self.max_points = max_points
+        self.running = False
+        self.paused = False
+        self.ser = None
+
+    def run(self):
+        try:
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=0.05)
+            time.sleep(1)  # Ждем инициализации
+
+            while self.running:
+                if not self.paused:
+                    try:
+                        if self.ser.in_waiting:
+                            line = self.ser.readline().decode('utf-8', 'ignore').strip()
+                            if line:
+                                try:
+                                    value = float(line)
+                                    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                                    self.data_received.emit(value, timestamp)
+                                except ValueError:
+                                    continue  # Игнорируем некорректные данные
+                    except Exception as e:
+                        self.error.emit(f"Ошибка чтения: {str(e)}")
+                        break
+
+                time.sleep(0.02)  # 50 Гц обновление
+
+        except Exception as e:
+            self.error.emit(f"Ошибка подключения: {str(e)}")
+        finally:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+
+    def start_reading(self):
+        self.running = True
+        self.start()
+
+    def stop_reading(self):
+        self.running = False
+        self.wait()
+
+    def pause_reading(self):
+        self.paused = not self.paused
+
+
+class LiveDataAcquisitionWidget(QWidget):
+    """Виджет для лайв-сбора данных ЭЭГ с расширенной визуализацией"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.reader = None
+        self.csv_writer = None
+        self.csv_file = None
+        self.values = deque(maxlen=1024)  # Буфер для последних 1024 значений (для спектрального анализа)
+        self.timestamps = deque(maxlen=1024)
+        self.running = False
+        self.paused = False
+        self.sampling_rate = 50.0  # Предполагаемая частота дискретизации, можно настроить
+        self.band_powers_history = {'delta': [], 'theta': [], 'alpha': [], 'beta': [], 'gamma': []}
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Верхняя панель с настройками и управлением
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(15)
+
+        # Панель настройки подключения
+        connection_group = QGroupBox("Настройки подключения")
+        connection_layout = QVBoxLayout()
+        connection_layout.setSpacing(8)
+        connection_layout.setContentsMargins(15, 15, 15, 15)
+
+        # COM порт и baudrate в одном ряду
+        port_baud_layout = QHBoxLayout()
+        port_baud_layout.setSpacing(10)
+
+        port_baud_layout.addWidget(QLabel("COM порт:"))
+        self.port_combo = QComboBox()
+        self.port_combo.addItem("Не выбран")
+        if SERIAL_AVAILABLE:
+            ports = [p.device for p in list_ports.comports()]
+            for port in ports:
+                self.port_combo.addItem(port)
+        port_baud_layout.addWidget(self.port_combo)
+
+        port_baud_layout.addWidget(QLabel("Baudrate:"))
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
+        self.baud_combo.setCurrentText("115200")
+        port_baud_layout.addWidget(self.baud_combo)
+
+        port_baud_layout.addWidget(QLabel("Частота (Гц):"))
+        self.sampling_rate_spin = QSpinBox()
+        self.sampling_rate_spin.setRange(10, 1000)
+        self.sampling_rate_spin.setValue(50)
+        self.sampling_rate_spin.setSuffix(" Гц")
+        self.sampling_rate_spin.valueChanged.connect(self.update_sampling_rate)
+        port_baud_layout.addWidget(self.sampling_rate_spin)
+
+        port_baud_layout.addStretch()
+        connection_layout.addLayout(port_baud_layout)
+
+        # Файл для сохранения
+        csv_layout = QHBoxLayout()
+        csv_layout.setSpacing(10)
+        csv_layout.addWidget(QLabel("CSV файл:"))
+        self.csv_path_edit = QLineEdit()
+        self.csv_path_edit.setText("live_eeg_data.csv")
+        csv_layout.addWidget(self.csv_path_edit)
+
+        self.browse_csv_btn = StyledButton("Обзор")
+        self.browse_csv_btn.clicked.connect(self.browse_csv)
+        csv_layout.addWidget(self.browse_csv_btn)
+        connection_layout.addLayout(csv_layout)
+
+        connection_group.setLayout(connection_layout)
+        top_layout.addWidget(connection_group)
+
+        # Панель управления сбором данных
+        control_group = QGroupBox("Управление сбором данных")
+        control_layout = QVBoxLayout()
+        control_layout.setSpacing(10)
+        control_layout.setContentsMargins(15, 15, 15, 15)
+
+        # Кнопки управления
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(10)
+
+        self.start_btn = StyledButton("СТАРТ")
+        self.start_btn.clicked.connect(self.start_acquisition)
+        self.start_btn.setEnabled(False)
+        buttons_layout.addWidget(self.start_btn)
+
+        self.pause_btn = StyledButton("ПАУЗА")
+        self.pause_btn.clicked.connect(self.pause_acquisition)
+        self.pause_btn.setEnabled(False)
+        buttons_layout.addWidget(self.pause_btn)
+
+        self.stop_btn = StyledButton("СТОП")
+        self.stop_btn.clicked.connect(self.stop_acquisition)
+        self.stop_btn.setEnabled(False)
+        buttons_layout.addWidget(self.stop_btn)
+
+        buttons_layout.addStretch()
+        control_layout.addLayout(buttons_layout)
+
+        # Статус и счетчики
+        status_layout = QHBoxLayout()
+        self.status_label = QLabel("Статус: Готов")
+        self.status_label.setStyleSheet("font-weight: bold; color: #666;")
+        status_layout.addWidget(self.status_label)
+
+        status_layout.addStretch()
+
+        self.samples_label = QLabel("Сэмплов: 0")
+        status_layout.addWidget(self.samples_label)
+
+        self.sampling_rate_label = QLabel("Частота: 50 Гц")
+        status_layout.addWidget(self.sampling_rate_label)
+
+        control_layout.addLayout(status_layout)
+        control_group.setLayout(control_layout)
+        top_layout.addWidget(control_group)
+
+        layout.addLayout(top_layout)
+
+        # Панель с метриками
+        metrics_group = QGroupBox("Метрики в реальном времени")
+        metrics_layout = QGridLayout()
+        metrics_layout.setSpacing(10)
+        metrics_layout.setContentsMargins(15, 15, 15, 15)
+
+        # Метрики ритмов
+        self.metric_labels = {}
+        bands = ['Дельта', 'Тета', 'Альфа', 'Бета', 'Гамма']
+        band_keys = ['delta', 'theta', 'alpha', 'beta', 'gamma']
+
+        for i, (band_name, band_key) in enumerate(zip(bands, band_keys)):
+            metrics_layout.addWidget(QLabel(f"{band_name}:"), i, 0)
+            self.metric_labels[band_key] = QLabel("0.000 мкВ²")
+            self.metric_labels[band_key].setStyleSheet("font-weight: bold; color: #2E7D32;")
+            metrics_layout.addWidget(self.metric_labels[band_key], i, 1)
+
+        # Дополнительные метрики
+        metrics_layout.addWidget(QLabel("Среднее:"), 0, 2)
+        self.mean_label = QLabel("0.000")
+        self.mean_label.setStyleSheet("font-weight: bold; color: #1976D2;")
+        metrics_layout.addWidget(self.mean_label, 0, 3)
+
+        metrics_layout.addWidget(QLabel("Стд. откл.:"), 1, 2)
+        self.std_label = QLabel("0.000")
+        self.std_label.setStyleSheet("font-weight: bold; color: #1976D2;")
+        metrics_layout.addWidget(self.std_label, 1, 3)
+
+        metrics_layout.addWidget(QLabel("Мин/Макс:"), 2, 2)
+        self.minmax_label = QLabel("0.000 / 0.000")
+        self.minmax_label.setStyleSheet("font-weight: bold; color: #1976D2;")
+        metrics_layout.addWidget(self.minmax_label, 2, 3)
+
+        metrics_group.setLayout(metrics_layout)
+        layout.addWidget(metrics_group)
+
+        # Вкладки для разных типов визуализации
+        self.viz_tabs = QTabWidget()
+        self.viz_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 2px solid #dee2e6;
+                background-color: white;
+                border-radius: 8px;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f8f9fa, stop:1 #e9ecef);
+                color: #495057;
+                padding: 10px 20px;
+                margin-right: 3px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-weight: 600;
+                font-size: 11pt;
+                min-width: 100px;
+            }
+            QTabBar::tab:selected {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #4CAF50, stop:1 #45a049);
+                color: white;
+                border-bottom: 3px solid #2e7d32;
+            }
+        """)
+
+        # Вкладка 1: Сигнал во времени
+        self.signal_tab = QWidget()
+        self.setup_signal_tab()
+        self.viz_tabs.addTab(self.signal_tab, "Сигнал")
+
+        # Вкладка 2: Спектр мощности
+        self.spectrum_tab = QWidget()
+        self.setup_spectrum_tab()
+        self.viz_tabs.addTab(self.spectrum_tab, "Спектр")
+
+        # Вкладка 3: Ритмы мозга
+        self.bands_tab = QWidget()
+        self.setup_bands_tab()
+        self.viz_tabs.addTab(self.bands_tab, "Ритмы")
+
+        layout.addWidget(self.viz_tabs)
+
+        self.setLayout(layout)
+
+        # Таймеры для обновления графиков
+        self.signal_update_timer = QTimer()
+        self.signal_update_timer.timeout.connect(self.update_signal_plot)
+        self.signal_update_timer.setInterval(50)  # 20 FPS для сигнала
+
+        self.analysis_update_timer = QTimer()
+        self.analysis_update_timer.timeout.connect(self.update_analysis_plots)
+        self.analysis_update_timer.setInterval(500)  # 2 FPS для анализа
+
+        # Обновляем доступность кнопок при изменении порта
+        self.port_combo.currentTextChanged.connect(self.update_start_button)
+
+    def update_sampling_rate(self):
+        """Обновление частоты дискретизации"""
+        self.sampling_rate = float(self.sampling_rate_spin.value())
+        self.sampling_rate_label.setText(f"Частота: {self.sampling_rate} Гц")
+
+    def setup_signal_tab(self):
+        """Настройка вкладки с сигналом"""
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self.signal_plot = MatplotlibWidget()
+        layout.addWidget(self.signal_plot)
+
+        self.signal_tab.setLayout(layout)
+
+    def setup_spectrum_tab(self):
+        """Настройка вкладки со спектром"""
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self.spectrum_plot = MatplotlibWidget()
+        layout.addWidget(self.spectrum_plot)
+
+        self.spectrum_tab.setLayout(layout)
+
+    def setup_bands_tab(self):
+        """Настройка вкладки с ритмами"""
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Панель выбора каналов для отображения
+        controls_layout = QHBoxLayout()
+        controls_layout.addWidget(QLabel("Показать ритмы:"))
+        self.show_bands_combo = QComboBox()
+        self.show_bands_combo.addItems(["Все ритмы", "Дельта", "Тета", "Альфа", "Бета", "Гамма"])
+        controls_layout.addWidget(self.show_bands_combo)
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+
+        self.bands_plot = MatplotlibWidget()
+        layout.addWidget(self.bands_plot)
+
+        self.bands_tab.setLayout(layout)
+
+    def update_start_button(self):
+        port = self.port_combo.currentText()
+        self.start_btn.setEnabled(port != "Не выбран" and SERIAL_AVAILABLE)
+
+    def browse_csv(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Выберите файл для сохранения данных",
+            "live_eeg_data.csv",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if file_path:
+            self.csv_path_edit.setText(file_path)
+
+    def start_acquisition(self):
+        if not SERIAL_AVAILABLE:
+            QMessageBox.warning(self, "Ошибка", "Библиотека PySerial не установлена")
+            return
+
+        port = self.port_combo.currentText()
+        if port == "Не выбран":
+            QMessageBox.warning(self, "Ошибка", "Выберите COM порт")
+            return
+
+        try:
+            baudrate = int(self.baud_combo.currentText())
+            self.sampling_rate = float(self.sampling_rate_spin.value())
+            self.sampling_rate_label.setText(f"Частота: {self.sampling_rate} Гц")
+            csv_path = self.csv_path_edit.toPlainText().strip()
+
+            if not csv_path:
+                QMessageBox.warning(self, "Ошибка", "Укажите путь к CSV файлу")
+                return
+
+            # Инициализируем CSV файл
+            self.init_csv_file(csv_path)
+
+            # Запускаем поток чтения
+            self.reader = SerialDataReader(port, baudrate)
+            self.reader.data_received.connect(self.on_data_received)
+            self.reader.error.connect(self.on_error)
+            self.reader.start_reading()
+
+            self.running = True
+            self.paused = False
+            self.update_buttons()
+            self.status_label.setText("Статус: <span style='color: green;'>Запись</span>")
+            self.signal_update_timer.start()
+            self.analysis_update_timer.start()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось начать сбор данных:\n{str(e)}")
+
+    def pause_acquisition(self):
+        if self.reader:
+            self.reader.pause_reading()
+            self.paused = not self.paused
+            if self.paused:
+                self.status_label.setText("Статус: <span style='color: orange;'>Пауза</span>")
+                self.signal_update_timer.stop()
+                self.analysis_update_timer.stop()
+            else:
+                self.status_label.setText("Статус: <span style='color: green;'>Запись</span>")
+                self.signal_update_timer.start()
+                self.analysis_update_timer.start()
+            self.update_buttons()
+
+    def stop_acquisition(self):
+        if self.reader:
+            self.reader.stop_reading()
+            self.reader = None
+
+        self.running = False
+        self.paused = False
+        self.signal_update_timer.stop()
+        self.analysis_update_timer.stop()
+        self.update_buttons()
+        self.status_label.setText("Статус: <span style='color: #666;'>Остановлено</span>")
+
+        # Закрываем CSV файл
+        if self.csv_file:
+            self.csv_file.close()
+            self.csv_file = None
+            self.csv_writer = None
+
+    def update_buttons(self):
+        self.start_btn.setEnabled(not self.running)
+        self.pause_btn.setEnabled(self.running)
+        self.stop_btn.setEnabled(self.running)
+
+    def init_csv_file(self, path):
+        """Инициализация CSV файла с заголовками"""
+        try:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.csv_file = open(path, 'a', newline='', encoding='utf-8')
+            self.csv_writer = csv.writer(self.csv_file)
+            # Проверяем, пустой ли файл, и добавляем заголовки если нужно
+            if self.csv_file.tell() == 0:
+                self.csv_writer.writerow(['timestamp', 'value'])
+            self.csv_file.flush()
+        except Exception as e:
+            raise Exception(f"Ошибка создания CSV файла: {str(e)}")
+
+    def on_data_received(self, value, timestamp):
+        """Обработка полученных данных"""
+        self.values.append(value)
+        self.timestamps.append(timestamp)
+
+        # Записываем в CSV
+        if self.csv_writer:
+            self.csv_writer.writerow([timestamp, value])
+            self.csv_file.flush()
+
+        # Обновляем счетчик
+        self.samples_label.setText(f"Сэмплов: {len(self.values)}")
+
+        # Обновляем базовые метрики в реальном времени
+        if len(self.values) > 0:
+            values_list = list(self.values)
+            self.mean_label.setText(".3f")
+            self.std_label.setText(".3f")
+            self.minmax_label.setText(".3f")
+
+    def on_error(self, error_msg):
+        """Обработка ошибок"""
+        QMessageBox.critical(self, "Ошибка", f"Ошибка при сборе данных:\n{error_msg}")
+        self.stop_acquisition()
+
+    def update_signal_plot(self):
+        """Быстрое обновление графика сигнала"""
+        if not self.values:
+            return
+
+        try:
+            # Создаем график сигнала
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.clear()
+
+            # Данные для графика
+            x = list(range(len(self.values)))
+            y = list(self.values)
+
+            ax.plot(x, y, 'b-', linewidth=1.5, alpha=0.8)
+            ax.set_xlabel('Время (сэмплы)', fontsize=12)
+            ax.set_ylabel('Амплитуда (мкВ)', fontsize=12)
+            ax.set_title('Лайв-сигнал ЭЭГ', fontsize=14, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+
+            # Настраиваем пределы
+            if len(y) > 1:
+                margin = (max(y) - min(y)) * 0.1 if max(y) != min(y) else 1.0
+                ax.set_ylim(min(y) - margin, max(y) + margin)
+
+            plt.tight_layout()
+
+            # Отображаем график
+            self.signal_plot.plot_figure(fig)
+            plt.close(fig)
+
+        except Exception as e:
+            print(f"Ошибка обновления графика сигнала: {str(e)}")
+
+    def update_analysis_plots(self):
+        """Медленное обновление графиков анализа (спектр и ритмы)"""
+        if len(self.values) < 64:  # Нужно минимум 64 сэмпла для спектрального анализа
+            return
+
+        try:
+            values_array = np.array(list(self.values))
+
+            # Обновляем метрики ритмов
+            self.update_band_powers(values_array)
+
+            # Обновляем спектр
+            self.update_spectrum_plot(values_array)
+
+            # Обновляем график ритмов
+            self.update_bands_plot()
+
+        except Exception as e:
+            print(f"Ошибка обновления анализа: {str(e)}")
+
+    def update_spectrum_plot(self, data):
+        """Обновление графика спектра мощности"""
+        try:
+            from scipy import signal
+            from scipy.fft import fft, fftfreq
+
+            # Вычисляем спектр
+            n = len(data)
+            if n < 64:
+                return
+
+            # Применяем окно Ханна
+            windowed = data * signal.windows.hann(n)
+            fft_vals = fft(windowed)
+            freqs = fftfreq(n, 1 / self.sampling_rate)
+
+            # Берем только положительные частоты
+            positive_idx = freqs > 0
+            freqs_pos = freqs[positive_idx]
+            psd = np.abs(fft_vals[positive_idx]) ** 2
+
+            # Создаем график
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.clear()
+
+            ax.semilogy(freqs_pos, psd, 'g-', linewidth=2, alpha=0.8)
+            ax.set_xlabel('Частота (Гц)', fontsize=12)
+            ax.set_ylabel('Спектральная плотность мощности', fontsize=12)
+            ax.set_title('Спектр мощности ЭЭГ', fontsize=14, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.set_xlim(0.5, 50)  # Показываем частоты от 0.5 до 50 Гц
+
+            plt.tight_layout()
+            self.spectrum_plot.plot_figure(fig)
+            plt.close(fig)
+
+        except Exception as e:
+            print(f"Ошибка обновления спектра: {str(e)}")
+
+    def update_band_powers(self, data):
+        """Вычисление мощности ритмов и обновление метрик"""
+        try:
+            from scipy import signal
+            from scipy.integrate import trapezoid
+
+            if len(data) < 128:  # Нужно минимум данных для анализа
+                return
+
+            # Вычисляем спектр
+            freqs, psd = signal.welch(data, fs=self.sampling_rate, nperseg=min(256, len(data)))
+
+            # Определяем диапазоны ритмов
+            bands = {
+                'delta': (0.5, 4.0),
+                'theta': (4.0, 8.0),
+                'alpha': (8.0, 13.0),
+                'beta': (13.0, 30.0),
+                'gamma': (30.0, 100.0)
+            }
+
+            # Вычисляем мощность для каждого ритма
+            for band_name, (low_freq, high_freq) in bands.items():
+                mask = (freqs >= low_freq) & (freqs <= high_freq)
+                if np.any(mask):
+                    band_power = trapezoid(psd[mask], freqs[mask])
+                    self.metric_labels[band_name].setText(".4f")
+
+                    # Сохраняем историю для графика ритмов
+                    self.band_powers_history[band_name].append(band_power)
+                    if len(self.band_powers_history[band_name]) > 50:  # Храним последние 50 значений
+                        self.band_powers_history[band_name].pop(0)
+
+        except Exception as e:
+            print(f"Ошибка вычисления ритмов: {str(e)}")
+
+    def update_bands_plot(self):
+        """Обновление графика ритмов мозга"""
+        try:
+            show_band = self.show_bands_combo.currentText()
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.clear()
+
+            if show_band == "Все ритмы":
+                # Показываем все ритмы на одном графике
+                colors = {'delta': 'purple', 'theta': 'blue', 'alpha': 'green', 'beta': 'orange', 'gamma': 'red'}
+                labels = {'delta': 'Дельта', 'theta': 'Тета', 'alpha': 'Альфа', 'beta': 'Бета', 'gamma': 'Гамма'}
+
+                for band_name, history in self.band_powers_history.items():
+                    if history:
+                        x = list(range(len(history)))
+                        y = history
+                        ax.plot(x, y, color=colors[band_name], linewidth=2, label=labels[band_name])
+
+                ax.legend()
+                ax.set_title('Мощность ритмов мозга (все)', fontsize=14, fontweight='bold')
+            else:
+                # Показываем только выбранный ритм
+                band_key = show_band.lower()
+                if band_key in self.band_powers_history and self.band_powers_history[band_key]:
+                    x = list(range(len(self.band_powers_history[band_key])))
+                    y = self.band_powers_history[band_key]
+
+                    colors = {'дельта': 'purple', 'тета': 'blue', 'альфа': 'green', 'бета': 'orange', 'гамма': 'red'}
+                    ax.plot(x, y, color=colors.get(band_key, 'blue'), linewidth=3)
+                    ax.set_title(f'Мощность ритма: {show_band}', fontsize=14, fontweight='bold')
+
+            ax.set_xlabel('Время', fontsize=12)
+            ax.set_ylabel('Мощность (мкВ²)', fontsize=12)
+            ax.grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            self.bands_plot.plot_figure(fig)
+            plt.close(fig)
+
+        except Exception as e:
+            print(f"Ошибка обновления графика ритмов: {str(e)}")
+
+    def closeEvent(self, event):
+        """Обработка закрытия виджета"""
+        self.stop_acquisition()
+        super().closeEvent(event)
 
 
 class MatplotlibWidget(QWidget):
@@ -440,7 +1079,11 @@ class EEGAnalysisApp(QMainWindow):
         self.tab_results = QWidget()
         self.setup_results_tab()
         self.tabs.addTab(self.tab_results, "Результаты")
-        
+
+        # Вкладка 5: Лайв-сбор данных
+        self.tab_live = LiveDataAcquisitionWidget()
+        self.tabs.addTab(self.tab_live, "Лайв-сбор")
+
         main_layout.addWidget(self.tabs)
         
         # Статусная строка

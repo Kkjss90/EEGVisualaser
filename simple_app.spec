@@ -25,6 +25,8 @@ a = Analysis(
         'matplotlib.backends.backend_qt5agg',
         'lazy_loader',
         'lazy_loader.lazy_loader',
+        'serial',
+        'serial.tools.list_ports',
     ] + mne_hiddenimports,
     hookspath=['.'],
     hooksconfig={},
