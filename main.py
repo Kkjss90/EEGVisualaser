@@ -141,6 +141,11 @@ class LiveDataAcquisitionWidget(QWidget):
         self.paused = False
         self.sampling_rate = 50.0  # Предполагаемая частота дискретизации, можно настроить
         self.band_powers_history = {'delta': [], 'theta': [], 'alpha': [], 'beta': [], 'gamma': []}
+
+        # Инициализация виджетов статуса
+        self.scan_status_label = QLabel("")
+        self.scan_status_label.setStyleSheet("color: #666; font-style: italic;")
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -171,6 +176,12 @@ class LiveDataAcquisitionWidget(QWidget):
                 self.port_combo.addItem(port)
         port_baud_layout.addWidget(self.port_combo)
 
+        # Кнопка сканирования портов
+        self.scan_ports_btn = StyledButton("Сканировать")
+        self.scan_ports_btn.clicked.connect(self.scan_ports)
+        self.scan_ports_btn.setMaximumWidth(100)
+        port_baud_layout.addWidget(self.scan_ports_btn)
+
         port_baud_layout.addWidget(QLabel("Baudrate:"))
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
@@ -187,6 +198,9 @@ class LiveDataAcquisitionWidget(QWidget):
 
         port_baud_layout.addStretch()
         connection_layout.addLayout(port_baud_layout)
+
+        # Строка статуса сканирования
+        connection_layout.addWidget(self.scan_status_label)
 
         # Файл для сохранения
         csv_layout = QHBoxLayout()
@@ -348,6 +362,74 @@ class LiveDataAcquisitionWidget(QWidget):
         # Обновляем доступность кнопок при изменении порта
         self.port_combo.currentTextChanged.connect(self.update_start_button)
 
+    def scan_ports(self):
+        """Сканирование доступных COM портов и поиск Arduino"""
+        if not SERIAL_AVAILABLE:
+            QMessageBox.warning(self, "Ошибка", "Библиотека PySerial не установлена")
+            return
+
+        try:
+            self.scan_status_label.setText("Сканирование портов...")
+            self.scan_ports_btn.setEnabled(False)
+            QApplication.processEvents()
+
+            # Получаем список всех доступных портов
+            available_ports = list_ports.comports()
+            arduino_ports = []
+
+            # Сканируем каждый порт
+            for port in available_ports:
+                try:
+                    # Пробуем подключиться к порту
+                    ser = serial.Serial(port.device, 115200, timeout=1)
+
+                    # Отправляем запрос идентификации
+                    ser.write(b"IDENTIFY\n")
+
+                    # Ждем ответ
+                    response = ser.readline().decode('utf-8', 'ignore').strip()
+
+                    # Проверяем, является ли устройство Arduino с нашей прошивкой
+                    if "EEG Arduino" in response or "Multi-Channel EEG" in response:
+                        arduino_ports.append((port.device, port.description, "EEG Arduino"))
+                    else:
+                        # Проверяем по другим признакам (VID:PID для Arduino)
+                        if hasattr(port, 'vid') and hasattr(port, 'pid'):
+                            # Arduino Uno: VID=0x2341, PID=0x0001 или VID=0x2A03, PID=0x0043
+                            if (port.vid == 0x2341 or port.vid == 0x2A03) and port.pid in [0x0001, 0x0043, 0x0044]:
+                                arduino_ports.append((port.device, port.description, "Arduino (предположительно)"))
+
+                    ser.close()
+
+                except (serial.SerialException, OSError):
+                    # Порт недоступен, пропускаем
+                    continue
+
+            # Обновляем список портов
+            self.port_combo.clear()
+            self.port_combo.addItem("Не выбран")
+
+            if arduino_ports:
+                self.scan_status_label.setText(f"Найдено Arduino устройств: {len(arduino_ports)}")
+                for port_name, description, device_type in arduino_ports:
+                    display_text = f"{port_name} - {description} ({device_type})"
+                    self.port_combo.addItem(display_text, port_name)  # Сохраняем реальное имя порта как данные
+
+                # Автоматически выбираем первый найденный Arduino
+                self.port_combo.setCurrentIndex(1)
+            else:
+                self.scan_status_label.setText("Arduino устройства не найдены")
+                # Добавляем все доступные порты для ручного выбора
+                for port in available_ports:
+                    display_text = f"{port.device} - {port.description}"
+                    self.port_combo.addItem(display_text, port.device)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка сканирования", f"Не удалось выполнить сканирование:\n{str(e)}")
+            self.scan_status_label.setText("Ошибка сканирования")
+        finally:
+            self.scan_ports_btn.setEnabled(True)
+
     def update_sampling_rate(self):
         """Обновление частоты дискретизации"""
         self.sampling_rate = float(self.sampling_rate_spin.value())
@@ -393,8 +475,8 @@ class LiveDataAcquisitionWidget(QWidget):
         self.bands_tab.setLayout(layout)
 
     def update_start_button(self):
-        port = self.port_combo.currentText()
-        self.start_btn.setEnabled(port != "Не выбран" and SERIAL_AVAILABLE)
+        port = self.port_combo.currentData()
+        self.start_btn.setEnabled(port is not None and port != "Не выбран" and SERIAL_AVAILABLE)
 
     def browse_csv(self):
         file_path, _ = QFileDialog.getSaveFileName(
@@ -411,8 +493,9 @@ class LiveDataAcquisitionWidget(QWidget):
             QMessageBox.warning(self, "Ошибка", "Библиотека PySerial не установлена")
             return
 
-        port = self.port_combo.currentText()
-        if port == "Не выбран":
+        # Получаем реальное имя порта из данных combo box
+        port = self.port_combo.currentData()
+        if port is None or port == "Не выбран":
             QMessageBox.warning(self, "Ошибка", "Выберите COM порт")
             return
 
