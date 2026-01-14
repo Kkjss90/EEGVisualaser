@@ -37,7 +37,10 @@ try:
     SERIAL_AVAILABLE = True
 except ImportError:
     SERIAL_AVAILABLE = False
-    print("Warning: PySerial not available. Live data acquisition will not work.")
+    print("Warning: PySerial not available.")
+    print("To enable live data acquisition from Arduino, install PySerial:")
+    print("pip install pyserial")
+    print("or: pip install -r requirements.txt")
 
 # Импорт наших модулей
 from eeg_analysis.data_loader import EEGDataLoader
@@ -365,7 +368,12 @@ class LiveDataAcquisitionWidget(QWidget):
     def scan_ports(self):
         """Сканирование доступных COM портов и поиск Arduino"""
         if not SERIAL_AVAILABLE:
-            QMessageBox.warning(self, "Ошибка", "Библиотека PySerial не установлена")
+            error_msg = ("Библиотека PySerial не установлена.\n\n"
+                        "Для использования функции лайв-сбора данных установите PySerial:\n\n"
+                        "pip install pyserial\n\n"
+                        "Или через requirements.txt:\n"
+                        "pip install -r requirements.txt")
+            QMessageBox.warning(self, "Библиотека не установлена", error_msg)
             return
 
         try:
@@ -490,7 +498,12 @@ class LiveDataAcquisitionWidget(QWidget):
 
     def start_acquisition(self):
         if not SERIAL_AVAILABLE:
-            QMessageBox.warning(self, "Ошибка", "Библиотека PySerial не установлена")
+            error_msg = ("Библиотека PySerial не установлена.\n\n"
+                        "Для использования функции лайв-сбора данных установите PySerial:\n\n"
+                        "pip install pyserial\n\n"
+                        "Или через requirements.txt:\n"
+                        "pip install -r requirements.txt")
+            QMessageBox.warning(self, "Библиотека не установлена", error_msg)
             return
 
         # Получаем реальное имя порта из данных combo box
@@ -503,7 +516,7 @@ class LiveDataAcquisitionWidget(QWidget):
             baudrate = int(self.baud_combo.currentText())
             self.sampling_rate = float(self.sampling_rate_spin.value())
             self.sampling_rate_label.setText(f"Частота: {self.sampling_rate} Гц")
-            csv_path = self.csv_path_edit.toPlainText().strip()
+            csv_path = self.csv_path_edit.text().strip()
 
             if not csv_path:
                 QMessageBox.warning(self, "Ошибка", "Укажите путь к CSV файлу")

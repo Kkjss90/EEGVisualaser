@@ -18,6 +18,13 @@ pip install -r requirements.txt
 python main.py
 ```
 
+**Важно:** Для использования функции лайв-сбора данных с Arduino убедитесь, что установлен PySerial:
+```bash
+pip install pyserial
+```
+
+Подробные инструкции по установке PySerial смотрите в файле `INSTALL_PYSERIAL.md`.
+
 ## Возможности
 
 ### Загрузка данных
@@ -79,6 +86,7 @@ pip install -r requirements.txt
 - matplotlib - визуализация
 - PyQt5 - графический интерфейс
 - pandas - работа с данными
+- **pyserial - работа с последовательными портами (для лайв-сбора)**
 
 ## Настройка Arduino для лайв-сбора данных
 
