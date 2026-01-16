@@ -130,6 +130,60 @@ class SerialDataReader(QThread):
         self.paused = not self.paused
 
 
+class TestDataGenerator(QThread):
+    """Генератор тестовых данных для проверки работы графиков"""
+
+    data_generated = pyqtSignal(float, str)  # value, timestamp
+    error = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.base_value = 0.0
+        self.noise_level = 5.0
+
+    def run(self):
+        try:
+            self.running = True
+            sample_count = 0
+
+            while self.running:
+                # Генерируем сигнал с некоторыми характеристиками ЭЭГ
+                # Основной сигнал + шум + альфа-ритм
+                alpha_freq = 10.0  # 10 Гц альфа ритм
+                time = sample_count / 50.0  # 50 Гц частота дискретизации
+
+                # Создаем сигнал с альфа-ритмом
+                alpha_signal = 20.0 * np.sin(2 * np.pi * alpha_freq * time)
+
+                # Добавляем шум
+                noise = np.random.normal(0, self.noise_level)
+
+                # Добавляем случайные спайки (имитация артефактов)
+                spike = 0
+                if np.random.random() < 0.01:  # 1% шанс спайка
+                    spike = np.random.choice([-50, 50])
+
+                # Итоговый сигнал
+                value = self.base_value + alpha_signal + noise + spike
+
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                self.data_generated.emit(value, timestamp)
+
+                sample_count += 1
+                time.sleep(0.02)  # 50 Гц
+
+        except Exception as e:
+            self.error.emit(f"Ошибка в тестовом генераторе: {str(e)}")
+
+    def start_generating(self):
+        self.start()
+
+    def stop_generating(self):
+        self.running = False
+        self.wait()
+
+
 class LiveDataAcquisitionWidget(QWidget):
     """Виджет для лайв-сбора данных ЭЭГ с расширенной визуализацией"""
 
@@ -245,6 +299,12 @@ class LiveDataAcquisitionWidget(QWidget):
         self.stop_btn.clicked.connect(self.stop_acquisition)
         self.stop_btn.setEnabled(False)
         buttons_layout.addWidget(self.stop_btn)
+
+        # Кнопка тестового режима
+        self.test_btn = StyledButton("ТЕСТ")
+        self.test_btn.clicked.connect(self.start_test_mode)
+        self.test_btn.setToolTip("Запуск тестового режима с генерацией случайных данных")
+        buttons_layout.addWidget(self.test_btn)
 
         buttons_layout.addStretch()
         control_layout.addLayout(buttons_layout)
@@ -486,6 +546,35 @@ class LiveDataAcquisitionWidget(QWidget):
         port = self.port_combo.currentData()
         self.start_btn.setEnabled(port is not None and port != "Не выбран" and SERIAL_AVAILABLE)
 
+    def start_test_mode(self):
+        """Запуск тестового режима с генерацией случайных данных"""
+        try:
+            csv_path = self.csv_path_edit.text().strip()
+            if not csv_path:
+                QMessageBox.warning(self, "Ошибка", "Укажите путь к CSV файлу")
+                return
+
+            # Инициализируем CSV файл
+            self.init_csv_file(csv_path)
+
+            # Создаем тестовый генератор данных
+            self.test_generator = TestDataGenerator()
+            self.test_generator.data_generated.connect(self.on_data_received)
+            self.test_generator.error.connect(self.on_error)
+            self.test_generator.start_generating()
+
+            self.running = True
+            self.paused = False
+            self.update_buttons()
+            self.status_label.setText("Статус: <span style='color: blue;'>Тестовый режим</span>")
+            print("Запуск таймеров в тестовом режиме...")
+            self.signal_update_timer.start()
+            self.analysis_update_timer.start()
+            print("Таймеры запущены")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось запустить тестовый режим:\n{str(e)}")
+
     def browse_csv(self):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -544,21 +633,34 @@ class LiveDataAcquisitionWidget(QWidget):
     def pause_acquisition(self):
         if self.reader:
             self.reader.pause_reading()
-            self.paused = not self.paused
-            if self.paused:
+        # Для тестового режима пауза обрабатывается в TestDataGenerator
+
+        self.paused = not self.paused
+        if self.paused:
+            if hasattr(self, 'test_generator') and self.test_generator:
+                self.status_label.setText("Статус: <span style='color: orange;'>Тест пауза</span>")
+            else:
                 self.status_label.setText("Статус: <span style='color: orange;'>Пауза</span>")
-                self.signal_update_timer.stop()
-                self.analysis_update_timer.stop()
+            self.signal_update_timer.stop()
+            self.analysis_update_timer.stop()
+        else:
+            if hasattr(self, 'test_generator') and self.test_generator:
+                self.status_label.setText("Статус: <span style='color: blue;'>Тестовый режим</span>")
             else:
                 self.status_label.setText("Статус: <span style='color: green;'>Запись</span>")
-                self.signal_update_timer.start()
-                self.analysis_update_timer.start()
-            self.update_buttons()
+            self.signal_update_timer.start()
+            self.analysis_update_timer.start()
+        self.update_buttons()
 
     def stop_acquisition(self):
         if self.reader:
             self.reader.stop_reading()
             self.reader = None
+
+        # Останавливаем тестовый генератор
+        if hasattr(self, 'test_generator') and self.test_generator:
+            self.test_generator.stop_generating()
+            self.test_generator = None
 
         self.running = False
         self.paused = False
@@ -607,9 +709,10 @@ class LiveDataAcquisitionWidget(QWidget):
         # Обновляем базовые метрики в реальном времени
         if len(self.values) > 0:
             values_list = list(self.values)
-            self.mean_label.setText(".3f")
-            self.std_label.setText(".3f")
-            self.minmax_label.setText(".3f")
+            self.mean_label.setText(f"{np.mean(values_list):.3f}")
+            self.std_label.setText(f"{np.std(values_list):.3f}")
+            min_val, max_val = min(values_list), max(values_list)
+            self.minmax_label.setText(f"{min_val:.3f} / {max_val:.3f}")
 
     def on_error(self, error_msg):
         """Обработка ошибок"""
