@@ -27,6 +27,7 @@ from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
@@ -508,8 +509,12 @@ class LiveDataAcquisitionWidget(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
 
-        self.signal_plot = MatplotlibWidget()
-        layout.addWidget(self.signal_plot)
+        self.live_signal_plot = MatplotlibWidget()
+        # self.live_signal_toolbar = NavigationToolbar(self.live_signal_plot.canvas, self)
+        # self.customize_toolbar_labels(self.live_signal_toolbar, "лайв-сигнала")
+
+        # layout.addWidget(self.live_signal_toolbar)
+        layout.addWidget(self.live_signal_plot)
 
         self.signal_tab.setLayout(layout)
 
@@ -518,8 +523,12 @@ class LiveDataAcquisitionWidget(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
 
-        self.spectrum_plot = MatplotlibWidget()
-        layout.addWidget(self.spectrum_plot)
+        self.live_spectrum_plot = MatplotlibWidget()
+        # self.live_spectrum_toolbar = NavigationToolbar(self.live_spectrum_plot.canvas, self)
+        # self.customize_toolbar_labels(self.live_spectrum_toolbar, "спектра")
+
+        # layout.addWidget(self.live_spectrum_toolbar)
+        layout.addWidget(self.live_spectrum_plot)
 
         self.spectrum_tab.setLayout(layout)
 
@@ -530,15 +539,21 @@ class LiveDataAcquisitionWidget(QWidget):
 
         # Панель выбора каналов для отображения
         controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(0, 0, 0, 5)
         controls_layout.addWidget(QLabel("Показать ритмы:"))
         self.show_bands_combo = QComboBox()
+        self.show_bands_combo.setMaximumWidth(120)
         self.show_bands_combo.addItems(["Все ритмы", "Дельта", "Тета", "Альфа", "Бета", "Гамма"])
         controls_layout.addWidget(self.show_bands_combo)
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
 
-        self.bands_plot = MatplotlibWidget()
-        layout.addWidget(self.bands_plot)
+        self.live_bands_plot = MatplotlibWidget()
+        # self.live_bands_toolbar = NavigationToolbar(self.live_bands_plot.canvas, self)
+        # self.customize_toolbar_labels(self.live_bands_toolbar, "ритмов")
+
+        # layout.addWidget(self.live_bands_toolbar)
+        layout.addWidget(self.live_bands_plot)
 
         self.bands_tab.setLayout(layout)
 
@@ -747,7 +762,7 @@ class LiveDataAcquisitionWidget(QWidget):
             plt.tight_layout()
 
             # Отображаем график
-            self.signal_plot.plot_figure(fig)
+            self.live_signal_plot.plot_figure(fig)
             plt.close(fig)
 
         except Exception as e:
@@ -806,7 +821,7 @@ class LiveDataAcquisitionWidget(QWidget):
             ax.set_xlim(0.5, 50)  # Показываем частоты от 0.5 до 50 Гц
 
             plt.tight_layout()
-            self.spectrum_plot.plot_figure(fig)
+            self.live_spectrum_plot.plot_figure(fig)
             plt.close(fig)
 
         except Exception as e:
@@ -885,7 +900,7 @@ class LiveDataAcquisitionWidget(QWidget):
             ax.grid(True, alpha=0.3)
 
             plt.tight_layout()
-            self.bands_plot.plot_figure(fig)
+            self.live_bands_plot.plot_figure(fig)
             plt.close(fig)
 
         except Exception as e:
@@ -1068,7 +1083,8 @@ class EEGAnalysisApp(QMainWindow):
         self.preprocessor = None
         self.analyzer = None
         self.visualizer = None
-        self.current_data = None
+        self.raw_data = None  # Оригинальные сырые данные
+        self.current_data = None  # Текущие обработанные данные
         self.loaded_file_paths = []  # Список загруженных файлов
         self.file_names_map = {}  # Маппинг каналов к именам файлов
         self.file_base_names_map = {}  # Маппинг каналов к базовым названиям файлов (без канала)
@@ -1226,54 +1242,54 @@ class EEGAnalysisApp(QMainWindow):
         """Инициализация интерфейса"""
         self.setWindowTitle('Приложение для анализа ЭЭГ')
         self.setGeometry(100, 100, 1600, 1000)
-        
+
         # Центральный виджет
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         # Главный layout
         main_layout = QVBoxLayout()
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(15, 15, 15, 15)
         central_widget.setLayout(main_layout)
-        
+
         # Панель загрузки данных
         load_group = QGroupBox("Загрузка данных")
         load_layout = QHBoxLayout()
-        
+
         self.load_btn = StyledButton("Загрузить файл(ы) ЭЭГ")
         self.load_btn.clicked.connect(self.load_data)
         self.file_label = QLabel("Файл не загружен")
         self.file_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
-        
+
         load_layout.addWidget(self.load_btn)
         load_layout.addWidget(self.file_label)
         load_layout.addStretch()
         load_layout.setSpacing(15)
         load_layout.setContentsMargins(15, 15, 15, 15)
-        
+
         load_group.setLayout(load_layout)
         main_layout.addWidget(load_group)
-        
+
         # Вкладки
         self.tabs = QTabWidget()
         self.tabs.setFont(QFont("Arial", 10))
-        
+
         # Вкладка 1: Визуализация сигналов
         self.tab_signals = QWidget()
         self.setup_signals_tab()
         self.tabs.addTab(self.tab_signals, "Сигналы")
-        
+
         # Вкладка 2: Предобработка
         self.tab_preprocessing = QWidget()
         self.setup_preprocessing_tab()
         self.tabs.addTab(self.tab_preprocessing, "Предобработка")
-        
+
         # Вкладка 3: Анализ
         self.tab_analysis = QWidget()
         self.setup_analysis_tab()
         self.tabs.addTab(self.tab_analysis, "Анализ")
-        
+
         # Вкладка 4: Результаты
         self.tab_results = QWidget()
         self.setup_results_tab()
@@ -1284,47 +1300,71 @@ class EEGAnalysisApp(QMainWindow):
         self.tabs.addTab(self.tab_live, "Лайв-сбор")
 
         main_layout.addWidget(self.tabs)
-        
+
         # Статусная строка
         self.statusBar().showMessage('Готово')
-    
+
     def setup_signals_tab(self):
         """Настройка вкладки визуализации сигналов"""
         layout = QVBoxLayout()
         layout.setSpacing(15)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Панель управления
+        # Панель управления (компактная - в два раза меньше)
         control_frame = QFrame()
         control_frame.setStyleSheet("""
             QFrame {
                 background-color: white;
                 border-radius: 8px;
-                padding: 15px;
+                padding: 4px;
                 border: 1px solid #e0e0e0;
+                margin-bottom: 3px;
+                max-height: 35px;
             }
         """)
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(15)
-        
+        control_layout.setSpacing(8)
+        control_layout.setContentsMargins(3, 3, 3, 3)
+
         channel_label = QLabel("Канал:")
-        channel_label.setStyleSheet("font-weight: 600;")
+        channel_label.setStyleSheet("font-weight: 600; font-size: 9pt;")
         control_layout.addWidget(channel_label)
         self.channel_combo = QComboBox()
+        self.channel_combo.setMaximumWidth(120)
+        self.channel_combo.setMaximumHeight(28)
+        self.channel_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 9pt;
+                padding: 2px 5px;
+            }
+        """)
         self.channel_combo.addItem("Все каналы")
         control_layout.addWidget(self.channel_combo)
-        
-        self.plot_signal_btn = StyledButton("Построить график")
+
+        self.plot_signal_btn = StyledButton("Построить")
+        self.plot_signal_btn.setMaximumWidth(90)
+        self.plot_signal_btn.setMaximumHeight(28)
+        self.plot_signal_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 9pt;
+                padding: 3px 8px;
+            }
+        """)
         self.plot_signal_btn.clicked.connect(self.plot_signals)
         control_layout.addWidget(self.plot_signal_btn)
-        
+
         control_layout.addStretch()
         control_frame.setLayout(control_layout)
         layout.addWidget(control_frame)
-        
-        # Виджет для графика
+
+        # График с панелью навигации (в два раза больше)
         self.signal_plot = MatplotlibWidget()
-        layout.addWidget(self.signal_plot)
+        self.signal_plot.setMinimumHeight(600)  # Увеличиваем высоту графика
+        self.signal_toolbar = NavigationToolbar(self.signal_plot.canvas, self)
+        self.customize_toolbar_labels(self.signal_toolbar, "сигналов")
+
+        layout.addWidget(self.signal_toolbar)
+        layout.addWidget(self.signal_plot, stretch=2)  # График занимает в два раза больше места
         
         self.tab_signals.setLayout(layout)
     
@@ -1346,15 +1386,22 @@ class EEGAnalysisApp(QMainWindow):
         """)
         channel_layout = QHBoxLayout()
         channel_layout.setSpacing(15)
-        
+
         channel_label = QLabel("Канал для обработки:")
         channel_label.setStyleSheet("font-weight: 600;")
         channel_layout.addWidget(channel_label)
         self.preprocessing_channel_combo = QComboBox()
         self.preprocessing_channel_combo.addItem("Все каналы")
         channel_layout.addWidget(self.preprocessing_channel_combo)
+
+        # Кнопка сброса рядом с выбором канала
+        self.reset_to_raw_btn = StyledButton("Сбросить к сырым")
+        self.reset_to_raw_btn.clicked.connect(self.reset_to_raw_data)
+        self.reset_to_raw_btn.setEnabled(False)  # Будет включаться после загрузки данных
+        channel_layout.addWidget(self.reset_to_raw_btn)
+
         channel_layout.addStretch()
-        
+
         channel_frame.setLayout(channel_layout)
         layout.addWidget(channel_frame)
         
@@ -1429,8 +1476,12 @@ class EEGAnalysisApp(QMainWindow):
         artifact_group.setLayout(artifact_layout)
         layout.addWidget(artifact_group)
         
-        # График обработанных данных
+        # График обработанных данных с навигацией
         self.preprocessed_plot = MatplotlibWidget()
+        self.preprocessing_toolbar = NavigationToolbar(self.preprocessed_plot.canvas, self)
+        self.customize_toolbar_labels(self.preprocessing_toolbar, "предобработки")
+
+        layout.addWidget(self.preprocessing_toolbar)
         layout.addWidget(self.preprocessed_plot)
         
         self.tab_preprocessing.setLayout(layout)
@@ -1441,45 +1492,84 @@ class EEGAnalysisApp(QMainWindow):
         layout.setSpacing(15)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Панель управления
+        # Панель управления (компактная - в два раза меньше)
         control_frame = QFrame()
         control_frame.setStyleSheet("""
             QFrame {
                 background-color: white;
                 border-radius: 8px;
-                padding: 15px;
+                padding: 4px;
                 border: 1px solid #e0e0e0;
+                margin-bottom: 3px;
+                max-height: 35px;
             }
         """)
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(15)
-        
+        control_layout.setSpacing(8)
+        control_layout.setContentsMargins(3, 3, 3, 3)
+
         channel_label = QLabel("Канал:")
-        channel_label.setStyleSheet("font-weight: 600;")
+        channel_label.setStyleSheet("font-weight: 600; font-size: 9pt;")
         control_layout.addWidget(channel_label)
         self.analysis_channel_combo = QComboBox()
+        self.analysis_channel_combo.setMaximumWidth(120)
+        self.analysis_channel_combo.setMaximumHeight(28)
+        self.analysis_channel_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 9pt;
+                padding: 2px 5px;
+            }
+        """)
         self.analysis_channel_combo.addItem("Средний по всем")
         control_layout.addWidget(self.analysis_channel_combo)
-        
-        self.analyze_psd_btn = StyledButton("Спектр мощности")
+
+        button_style = """
+            QPushButton {
+                font-size: 9pt;
+                padding: 3px 8px;
+            }
+        """
+
+        self.analyze_psd_btn = StyledButton("Спектр")
+        self.analyze_psd_btn.setMaximumWidth(70)
+        self.analyze_psd_btn.setMaximumHeight(28)
+        self.analyze_psd_btn.setStyleSheet(button_style)
         self.analyze_psd_btn.clicked.connect(self.analyze_psd)
         control_layout.addWidget(self.analyze_psd_btn)
-        
-        self.analyze_bands_btn = StyledButton("Мощность ритмов")
+
+        self.analyze_bands_btn = StyledButton("Ритмы")
+        self.analyze_bands_btn.setMaximumWidth(70)
+        self.analyze_bands_btn.setMaximumHeight(28)
+        self.analyze_bands_btn.setStyleSheet(button_style)
         self.analyze_bands_btn.clicked.connect(self.analyze_bands)
         control_layout.addWidget(self.analyze_bands_btn)
-        
-        self.analyze_features_btn = StyledButton("Извлечь признаки")
+
+        self.analyze_features_btn = StyledButton("Признаки")
+        self.analyze_features_btn.setMaximumWidth(70)
+        self.analyze_features_btn.setMaximumHeight(28)
+        self.analyze_features_btn.setStyleSheet(button_style)
         self.analyze_features_btn.clicked.connect(self.extract_features)
         control_layout.addWidget(self.analyze_features_btn)
-        
+
         control_layout.addStretch()
         control_frame.setLayout(control_layout)
         layout.addWidget(control_frame)
-        
-        # Виджет для графиков анализа
+
+        # График анализа с панелью навигации (в два раза больше)
+        plot_container = QWidget()
+        plot_layout = QVBoxLayout()
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+
         self.analysis_plot = MatplotlibWidget()
-        layout.addWidget(self.analysis_plot)
+        self.analysis_plot.setMinimumHeight(600)  # Увеличиваем высоту графика
+        self.analysis_toolbar = NavigationToolbar(self.analysis_plot.canvas, self)
+        self.customize_toolbar_labels(self.analysis_toolbar, "анализа")
+
+        plot_layout.addWidget(self.analysis_toolbar)
+        plot_layout.addWidget(self.analysis_plot)
+
+        plot_container.setLayout(plot_layout)
+        layout.addWidget(plot_container, stretch=2)  # График занимает в два раза больше места
         
         self.tab_analysis.setLayout(layout)
     
@@ -1537,6 +1627,7 @@ class EEGAnalysisApp(QMainWindow):
                 else:
                     data_dict = self.data_loader.load_data(file_path)
                 
+                self.raw_data = data_dict['data'].copy()  # Сохраняем копию сырых данных
                 self.current_data = data_dict['data']
                 self.sampling_rate = data_dict['sfreq']
                 self.channel_names = data_dict['ch_names']
@@ -1653,8 +1744,8 @@ class EEGAnalysisApp(QMainWindow):
                 
                 # Инициализируем модули
                 self.preprocessor = EEGPreprocessor(
-                    self.current_data, 
-                    self.sampling_rate, 
+                    self.current_data,
+                    self.sampling_rate,
                     self.channel_names
                 )
                 self.analyzer = EEGAnalyzer(
@@ -1667,6 +1758,9 @@ class EEGAnalysisApp(QMainWindow):
                     self.sampling_rate,
                     self.channel_names
                 )
+
+                # Включаем кнопку сброса
+                self.reset_to_raw_btn.setEnabled(True)
                 
                 # Показываем информацию о данных
                 summary = self.data_loader.get_data_summary()
@@ -1756,7 +1850,111 @@ class EEGAnalysisApp(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Ошибка при построении графика:\n{str(e)}")
             import traceback
             traceback.print_exc()
-    
+
+    def reset_to_raw_data(self):
+        """Сброс данных к исходным сырым данным"""
+        if self.raw_data is None:
+            QMessageBox.warning(self, "Предупреждение", "Сырые данные не загружены")
+            return
+
+        try:
+            # Восстанавливаем сырые данные
+            self.current_data = self.raw_data.copy()
+
+            # Обновляем все модули с сырыми данными
+            self.preprocessor = EEGPreprocessor(self.current_data, self.sampling_rate, self.channel_names)
+            self.analyzer = EEGAnalyzer(self.current_data, self.sampling_rate, self.channel_names)
+            self.visualizer = EEGVisualizer(self.current_data, self.sampling_rate, self.channel_names)
+
+            # Отрисовываем сырые данные на графике предобработки для выбранного канала
+            try:
+                # Получаем выбранный канал
+                channel_idx = self.preprocessing_channel_combo.currentIndex() - 1
+                
+                # Формируем информацию о файлах
+                file_info = {}
+                if channel_idx == -1:
+                    # Все каналы
+                    channels = None
+                    for i, ch_name in enumerate(self.channel_names):
+                        file_info[i] = {
+                            'base_name': self.file_base_names_map.get(ch_name, ""),
+                            'file_name': self.file_names_map.get(ch_name, "")
+                        }
+                else:
+                    # Только выбранный канал
+                    channels = [channel_idx]
+                    ch_name = self.channel_names[channel_idx]
+                    file_info[channel_idx] = {
+                        'base_name': self.file_base_names_map.get(ch_name, ""),
+                        'file_name': self.file_names_map.get(ch_name, "")
+                    }
+                
+                # Отрисовываем график для выбранного канала
+                fig = self.visualizer.plot_raw_signals(channels=channels, file_info=file_info)
+                self.preprocessed_plot.plot_figure(fig)
+                plt.close(fig)
+            except Exception as plot_error:
+                print(f"Ошибка отрисовки сырых данных: {plot_error}")
+                # Если не удалось нарисовать, просто очищаем график
+                self.preprocessed_plot.clear()
+
+            # Показываем информацию о сбросе
+            self.statusBar().showMessage('Данные сброшены к исходным сырым данным')
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сбросить данные:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def customize_toolbar_labels(self, toolbar, plot_type):
+        """Настройка надписей на панели инструментов matplotlib"""
+        try:
+            # Стилизуем панель инструментов
+            toolbar.setStyleSheet("""
+                QToolBar {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #f8f9fa, stop:1 #e9ecef);
+                    border: 1px solid #dee2e6;
+                    border-radius: 4px;
+                    padding: 2px;
+                    margin: 2px;
+                }
+                QToolButton {
+                    background: transparent;
+                    border: none;
+                    padding: 4px;
+                    border-radius: 3px;
+                    font-size: 10pt;
+                }
+                QToolButton:hover {
+                    background: rgba(76, 175, 80, 0.1);
+                }
+                QToolButton:pressed {
+                    background: rgba(76, 175, 80, 0.2);
+                }
+            """)
+
+            # Перевод надписей на русский
+            tooltips = {
+                'Home': f'Домой (исходный вид графика {plot_type})',
+                'Back': f'Назад (предыдущий вид графика {plot_type})',
+                'Forward': f'Вперёд (следующий вид графика {plot_type})',
+                'Pan': f'Перемещение (перетаскивание графика {plot_type})',
+                'Zoom': f'Масштаб (выделение области графика {plot_type})',
+                'Save': f'Сохранить (график {plot_type} в файл)',
+                'Configure subplots': f'Настройка подграфиков {plot_type}',
+                'Edit parameters': f'Параметры графика {plot_type}'
+            }
+
+            # Применяем переводы к кнопкам
+            for action in toolbar.actions():
+                if action.toolTip() in tooltips:
+                    action.setToolTip(tooltips[action.toolTip()])
+
+        except Exception as e:
+            print(f"Ошибка настройки панели инструментов: {e}")
+
     def apply_bandpass_filter(self):
         """Применение полосового фильтра"""
         if self.preprocessor is None:
@@ -1766,15 +1964,15 @@ class EEGAnalysisApp(QMainWindow):
         try:
             low_freq = self.low_freq_spin.value()
             high_freq = self.high_freq_spin.value()
-            
+
             # Получаем выбранный канал для обработки
             channel_idx = self.preprocessing_channel_combo.currentIndex() - 1
-            
+
             if channel_idx == -1:
-                # Обрабатываем все каналы
+                # Обрабатываем все каналы на текущих данных
                 filtered_data = self.preprocessor.apply_bandpass_filter(low_freq, high_freq)
             else:
-                # Обрабатываем только выбранный канал
+                # Обрабатываем только выбранный канал на текущих данных
                 temp_data = self.current_data.copy()
                 preprocessor_single = EEGPreprocessor(
                     temp_data[[channel_idx], :],
@@ -1784,10 +1982,11 @@ class EEGAnalysisApp(QMainWindow):
                 filtered_single = preprocessor_single.apply_bandpass_filter(low_freq, high_freq)
                 filtered_data = self.current_data.copy()
                 filtered_data[channel_idx, :] = filtered_single[0, :]
-            
+
             self.current_data = filtered_data
-            
-            # Обновляем модули
+
+            # Обновляем модули с новыми данными
+            self.preprocessor = EEGPreprocessor(filtered_data, self.sampling_rate, self.channel_names)
             self.analyzer = EEGAnalyzer(filtered_data, self.sampling_rate, self.channel_names)
             self.visualizer = EEGVisualizer(filtered_data, self.sampling_rate, self.channel_names)
             
@@ -1829,10 +2028,10 @@ class EEGAnalysisApp(QMainWindow):
             channel_idx = self.preprocessing_channel_combo.currentIndex() - 1
             
             if channel_idx == -1:
-                # Обрабатываем все каналы
+                # Обрабатываем все каналы на текущих данных
                 filtered_data = self.preprocessor.apply_notch_filter(notch_freq)
             else:
-                # Обрабатываем только выбранный канал
+                # Обрабатываем только выбранный канал на текущих данных
                 temp_data = self.current_data.copy()
                 preprocessor_single = EEGPreprocessor(
                     temp_data[[channel_idx], :],
@@ -1842,10 +2041,11 @@ class EEGAnalysisApp(QMainWindow):
                 filtered_single = preprocessor_single.apply_notch_filter(notch_freq)
                 filtered_data = self.current_data.copy()
                 filtered_data[channel_idx, :] = filtered_single[0, :]
-            
+
             self.current_data = filtered_data
-            
-            # Обновляем модули
+
+            # Обновляем модули с новыми данными
+            self.preprocessor = EEGPreprocessor(filtered_data, self.sampling_rate, self.channel_names)
             self.analyzer = EEGAnalyzer(filtered_data, self.sampling_rate, self.channel_names)
             self.visualizer = EEGVisualizer(filtered_data, self.sampling_rate, self.channel_names)
             
@@ -1887,10 +2087,10 @@ class EEGAnalysisApp(QMainWindow):
             channel_idx = self.preprocessing_channel_combo.currentIndex() - 1
             
             if channel_idx == -1:
-                # Обрабатываем все каналы
+                # Обрабатываем все каналы на текущих данных
                 cleaned_data, _ = self.preprocessor.remove_artifacts_by_threshold(threshold)
             else:
-                # Обрабатываем только выбранный канал
+                # Обрабатываем только выбранный канал на текущих данных
                 temp_data = self.current_data.copy()
                 preprocessor_single = EEGPreprocessor(
                     temp_data[[channel_idx], :],
@@ -1900,10 +2100,11 @@ class EEGAnalysisApp(QMainWindow):
                 cleaned_single, _ = preprocessor_single.remove_artifacts_by_threshold(threshold)
                 cleaned_data = self.current_data.copy()
                 cleaned_data[channel_idx, :] = cleaned_single[0, :]
-            
+
             self.current_data = cleaned_data
-            
-            # Обновляем модули
+
+            # Обновляем модули с новыми данными
+            self.preprocessor = EEGPreprocessor(cleaned_data, self.sampling_rate, self.channel_names)
             self.analyzer = EEGAnalyzer(cleaned_data, self.sampling_rate, self.channel_names)
             self.visualizer = EEGVisualizer(cleaned_data, self.sampling_rate, self.channel_names)
             
@@ -1943,10 +2144,10 @@ class EEGAnalysisApp(QMainWindow):
             channel_idx = self.preprocessing_channel_combo.currentIndex() - 1
             
             if channel_idx == -1:
-                # Обрабатываем все каналы
+                # Обрабатываем все каналы на текущих данных
                 cleaned_data = self.preprocessor.remove_blink_artifacts()
             else:
-                # Обрабатываем только выбранный канал
+                # Обрабатываем только выбранный канал на текущих данных
                 temp_data = self.current_data.copy()
                 preprocessor_single = EEGPreprocessor(
                     temp_data[[channel_idx], :],
@@ -1956,10 +2157,11 @@ class EEGAnalysisApp(QMainWindow):
                 cleaned_single = preprocessor_single.remove_blink_artifacts()
                 cleaned_data = self.current_data.copy()
                 cleaned_data[channel_idx, :] = cleaned_single[0, :]
-            
+
             self.current_data = cleaned_data
-            
-            # Обновляем модули
+
+            # Обновляем модули с новыми данными
+            self.preprocessor = EEGPreprocessor(cleaned_data, self.sampling_rate, self.channel_names)
             self.analyzer = EEGAnalyzer(cleaned_data, self.sampling_rate, self.channel_names)
             self.visualizer = EEGVisualizer(cleaned_data, self.sampling_rate, self.channel_names)
             
