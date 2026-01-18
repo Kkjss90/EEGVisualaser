@@ -180,7 +180,6 @@ sudo apt-get install python3-dev python3-pip libxcb-xinerama0 libxcb-icccm4 libx
 │   └── visualization.py       # Визуализация
 ├── main.py                    # Главное приложение
 ├── build_app.py               # Скрипт сборки приложения
-├── EEG_Analysis.app           # Готовое приложение
 ├── launch_final_app.sh        # Скрипт запуска
 ├── simple_app.spec            # Конфигурация PyInstaller
 ├── runtime_hook.py            # Настройки среды
